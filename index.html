@@ -257,6 +257,11 @@
             <input id="quizCustomCountInput" type="number" min="1" max="999" value="20" class="w-16 text-xs px-2 py-1 rounded-lg border border-slate-200 bg-white" />
             <button id="quizCustomApplyBtn" type="button" class="px-2 py-1 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition">套用</button>
           </div>
+          <select id="quizDistractorSelect" aria-label="干擾選項模式" class="text-xs px-2 py-1 rounded-lg border border-slate-200 bg-white font-medium text-slate-700">
+            <option value="mix">選項：混合誘答</option>
+            <option value="pseudo">選項：相近擬似詞</option>
+            <option value="deck">選項：僅限單字庫</option>
+          </select>
         </div>
       </div>
 
@@ -532,6 +537,7 @@
         quizType: 'mixed',
         quizCountMode: '10',
         quizCustomCount: 20,
+        quizDistractorMode: 'mix',
         quiz: {
           questions: [],
           idx: 0,
@@ -587,6 +593,138 @@
         if (p.includes('接')) return '接';
         if (p.includes('助')) return '助';
         return p.slice(0, 3);
+      }
+
+      function getWordFormKey(w) {
+        const pos = formatPosShort(w.pos);
+        const text = (w.reading || w.word || '').trim();
+        const rawWord = (w.word || '').trim();
+        if (pos === '動' || rawWord.endsWith('する') || text.endsWith('する')) {
+          if (text.endsWith('ます')) return '動:ます形';
+          if (text.endsWith('ない')) return '動:ない形';
+          if (/[てで]$/.test(text)) return '動:て形';
+          if (/[ただ]$/.test(text)) return '動:た形';
+          if (/[うくぐすつぬぶむる]$/.test(text)) return '動:辞書形';
+          return '動:其他';
+        }
+        if (pos === '形') {
+          return text.endsWith('い') ? '形:辞書形' : '形:其他';
+        }
+        if (pos === 'な形') return 'な形';
+        if (pos === '名') return '名';
+        if (pos === '副') return '副';
+        return '其他:' + (pos || '');
+      }
+
+      const DAKUTEN_MAP = {
+        'か':'が','が':'か','き':'ぎ','ぎ':'き','く':'ぐ','ぐ':'く','け':'げ','げ':'け','こ':'ご','ご':'こ',
+        'さ':'ざ','ざ':'さ','し':'じ','じ':'し','す':'ず','ず':'す','せ':'ぜ','ぜ':'せ','そ':'ぞ','ぞ':'そ',
+        'た':'だ','だ':'た','ち':'ぢ','ぢ':'ち','つ':'づ','づ':'つ','て':'で','で':'て','と':'ど','ど':'と',
+        'は':'ば','ば':'ぱ','ぱ':'は','ひ':'び','び':'ぴ','ぴ':'ひ','ふ':'ぶ','ぶ':'ぷ','ぷ':'ふ',
+        'へ':'べ','べ':'ぺ','ぺ':'へ','ほ':'ぼ','ぼ':'ぽ','ぽ':'ほ',
+        'カ':'ガ','ガ':'カ','キ':'ギ','ギ':'キ','ク':'グ','グ':'ク','ケ':'ゲ','ゲ':'ケ','コ':'ゴ','ゴ':'コ',
+        'サ':'ザ','ザ':'サ','シ':'ジ','ジ':'シ','ス':'ズ','ズ':'ス','セ':'ゼ','ゼ':'セ','ソ':'ゾ','ゾ':'ソ',
+        'タ':'ダ','ダ':'タ','チ':'ヂ','ヂ':'チ','ツ':'ヅ','ヅ':'ツ','テ':'デ','デ':'テ','ト':'ド','ド':'ト',
+        'ハ':'バ','バ':'パ','パ':'ハ','ヒ':'ビ','ビ':'ピ','ピ':'ヒ','フ':'ブ','ブ':'プ','プ':'フ',
+        'ヘ':'ベ','ベ':'ペ','ペ':'ヘ','ホ':'ボ','ボ':'ポ','ポ':'ホ'
+      };
+
+      const CONFUSABLE_KANJI = {
+        '見':['観','視','現'],'観':['見','視','勧'],'直':['値','置','真'],'把':['抱','押','払'],
+        '握':['掘','振','提'],'手':['取','持','指'],'配':['記','起','酸'],'検':['険','験','権'],
+        '討':['計','訂','対'],'充':['統','流','銃'],'実':['定','室','容'],'曖':['愛','暖','緩'],
+        '昧':['味','妹','未'],'今':['令','合','念'],'先':['洗','失','告'],'来':['末','未','米'],
+        '年':['午','牛','平'],'日':['白','目','百'],'月':['用','円','肉'],'週':['適','過','運'],
+        '意':['音','億','憶'],'思':['恩','息','想'],'考':['老','孝','者'],'変':['恋','湾','蛮'],
+        '確':['鶴','角','各'],'認':['記','説','談'],'決':['快','塊','潔'],'定':['実','室','宣'],
+        '要':['腰','票','価'],'求':['球','救','休'],'感':['惑','減','咸'],'情':['精','清','晴'],
+        '対':['討','付','射'],'応':['広','店','度'],'表':['責','素','麦'],'現':['見','規','視'],
+        '続':['読','売','買'],'開':['閉','間','聞'],'閉':['開','問','関'],'作':['昨','佐','借'],
+        '成':['城','誠','盛'],'動':['働','重','種'],'用':['角','周','同'],'大':['太','犬','天'],
+        '小':['少','水','糸'],'新':['親','薪','斬'],'古':['舌','吉','苦'],'高':['亮','京','亭']
+      };
+      const FALLBACK_KANJI = ['観','視','記','認','決','定','検','討','確','対','応','変','成','作','実','用','感','情'];
+
+      function generatePseudoDistractors(target, dir, needed, existingSet) {
+        const out = [];
+        const candidates = [];
+
+        if (dir === 'kanjiToKana') {
+          const base = (target.reading || target.word || '').trim();
+          const chars = Array.from(base);
+
+          // 1. Dakuten / handakuten swaps
+          chars.forEach((ch, idx) => {
+            if (DAKUTEN_MAP[ch]) {
+              const copy = chars.slice();
+              copy[idx] = DAKUTEN_MAP[ch];
+              candidates.push(copy.join(''));
+            }
+          });
+          // 2. Long vowel / small yoon / n-u mutations
+          if (base.includes('う')) candidates.push(base.replace('う', ''));
+          if (base.includes('ー')) candidates.push(base.replace('ー', ''));
+          if (base.includes('ん')) candidates.push(base.replace('ん', 'う'));
+          if (base.includes('ゅう')) candidates.push(base.replace('ゅう', 'ゅ'));
+          if (base.includes('ょう')) candidates.push(base.replace('ょう', 'ょ'));
+          if (base.includes('い')) candidates.push(base.replace('い', 'え'));
+          if (chars.length >= 2) {
+            // Insert small tsu before middle consonant
+            const mid = Math.floor(chars.length / 2);
+            const tsu = /[゠-ヿ]/.test(base) ? 'ッ' : 'っ';
+            const withTsu = chars.slice(0, mid).join('') + tsu + chars.slice(mid).join('');
+            candidates.push(withTsu);
+            // Swap two adjacent middle characters if distinct
+            if (chars[0] !== chars[1]) {
+              const swapped = chars.slice();
+              [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
+              candidates.push(swapped.join(''));
+            }
+          }
+          // 3. Ending kana mutation while preserving length
+          if (chars.length >= 2) {
+            const last = chars[chars.length - 1];
+            const altEnd = last === 'く' ? 'ぐ' : last === 'す' ? 'ず' : last === 'う' ? 'お' : last === 'い' ? 'え' : 'く';
+            if (altEnd !== last) {
+              candidates.push(chars.slice(0, -1).join('') + altEnd);
+            }
+          }
+        } else {
+          // dir === 'kanaToKanji': visually similar kanji or okurigana trap preserving form
+          const base = (target.word || '').trim();
+          const chars = Array.from(base);
+          const isKanji = ch => /[一-龯]/.test(ch);
+
+          chars.forEach((ch, idx) => {
+            if (!isKanji(ch)) return;
+            const alts = CONFUSABLE_KANJI[ch] || FALLBACK_KANJI;
+            alts.forEach(alt => {
+              if (alt !== ch) {
+                const copy = chars.slice();
+                copy[idx] = alt;
+                candidates.push(copy.join(''));
+              }
+            });
+          });
+          // Okurigana mutation if ends in hiragana verb ending
+          if (chars.length >= 2 && !isKanji(chars[chars.length - 1])) {
+            const end = chars[chars.length - 1];
+            const okuriAlt = end === 'す' ? 'る' : end === 'る' ? 'す' : end === 'う' ? 'く' : end === 'い' ? 'し' : '';
+            if (okuriAlt) {
+              candidates.push(chars.slice(0, -1).join('') + okuriAlt);
+            }
+          }
+        }
+
+        const shuffled = candidates.sort(() => Math.random() - 0.5);
+        for (const c of shuffled) {
+          if (c && !existingSet.has(c)) {
+            existingSet.add(c);
+            out.push(c);
+            if (out.length >= needed) break;
+          }
+        }
+        return out;
       }
 
       function getActiveDeck() {
@@ -998,16 +1136,43 @@
           const getOpt = w => dir === 'kanaToKanji' ? w.word : (w.reading || w.word);
           const correctText = getOpt(target);
 
+          const targetForm = getWordFormKey(target);
+          const targetPos = formatPosShort(target.pos);
+          const candidates = deck.words.filter(w => w.id !== target.id);
+          const shuffleArr = arr => arr.slice().sort(() => Math.random() - 0.5);
+
+          const tier1 = shuffleArr(candidates.filter(w => getWordFormKey(w) === targetForm));
+          const tier2 = shuffleArr(candidates.filter(w => getWordFormKey(w) !== targetForm && formatPosShort(w.pos) === targetPos));
+          const tier3 = shuffleArr(candidates.filter(w => formatPosShort(w.pos) !== targetPos));
+
           const distractors = [];
           const seen = new Set([correctText]);
-          for (const w of deck.words.slice().sort(() => Math.random() - 0.5)) {
-            if (w.id === target.id) continue;
-            const opt = getOpt(w);
-            if (!seen.has(opt)) {
-              seen.add(opt);
-              distractors.push(opt);
+          const deckAllTexts = new Set(deck.words.map(getOpt));
+          const dMode = state.quizDistractorMode;
+
+          if (dMode === 'pseudo') {
+            const pList = generatePseudoDistractors(target, dir, 3, new Set([...seen, ...deckAllTexts]));
+            pList.forEach(p => { seen.add(p); distractors.push(p); });
+          } else if (dMode === 'mix') {
+            // 1-2 pseudo traps + remaining from same-form deck words
+            const pList = generatePseudoDistractors(target, dir, 2, new Set([...seen, ...deckAllTexts]));
+            pList.forEach(p => { seen.add(p); distractors.push(p); });
+          }
+
+          if (distractors.length < 3) {
+            for (const w of [...tier1, ...tier2, ...tier3]) {
+              const opt = getOpt(w);
+              if (!seen.has(opt)) {
+                seen.add(opt);
+                distractors.push(opt);
+              }
+              if (distractors.length >= 3) break;
             }
-            if (distractors.length >= 3) break;
+          }
+
+          if (distractors.length < 3) {
+            const extra = generatePseudoDistractors(target, dir, 3 - distractors.length, seen);
+            extra.forEach(p => distractors.push(p));
           }
           const options = [correctText, ...distractors].sort(() => Math.random() - 0.5);
           return { target, dir, promptText, promptSub, correctText, options };
@@ -1584,6 +1749,10 @@
         if (state.quizCountMode !== 'custom') {
           startQuiz();
         }
+      });
+      document.getElementById('quizDistractorSelect').addEventListener('change', e => {
+        state.quizDistractorMode = e.target.value;
+        startQuiz();
       });
       document.getElementById('quizCustomApplyBtn').addEventListener('click', () => {
         const val = parseInt(document.getElementById('quizCustomCountInput').value, 10);
