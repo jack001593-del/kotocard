@@ -1204,14 +1204,14 @@
             dir = Math.random() < 0.5 ? 'kanaToKanji' : 'kanjiToKana';
           }
           const promptText = dir === 'kanaToKanji' ? (target.reading || target.word) : target.word;
-          const promptSub = dir === 'kanaToKanji' ? '請選出對應的漢字' : '請選出對應的假名與中文意思';
-          const getOpt = w => {
-            if (dir === 'kanaToKanji') return w.word;
-            const kana = w.reading || w.word;
+          const promptSub = dir === 'kanaToKanji' ? '請選出對應的漢字' : '第 1 步：請選出對應的假名讀音';
+          const getOpt = w => dir === 'kanaToKanji' ? w.word : (w.reading || w.word);
+          const getMeaningOpt = w => {
             const p = formatPosShort(w.pos);
-            return kana + ' — ' + (p ? '【' + p + '】' : '') + (w.meaning || '');
+            return (p ? '【' + p + '】' : '') + (w.meaning || '（未填寫）');
           };
           const correctText = getOpt(target);
+          const correctMeaningText = getMeaningOpt(target);
 
           const targetForm = getWordFormKey(target);
           const targetPos = formatPosShort(target.pos);
@@ -1241,7 +1241,12 @@
             ...distractorItems
           ].sort(() => Math.random() - 0.5);
           const options = optionObjects.map(o => o.optText);
-          return { target, dir, promptText, promptSub, correctText, options, optionObjects };
+          const meaningOptions = optionObjects.map(o => ({
+            wordObj: o.wordObj,
+            optText: getMeaningOpt(o.wordObj),
+            isCorrect: o.isCorrect
+          })).sort(() => Math.random() - 0.5);
+          return { target, dir, promptText, promptSub, correctText, correctMeaningText, options, optionObjects, meaningOptions, step: 1, step1Correct: null, step1Chosen: null };
         });
 
         state.quiz = { questions, idx: 0, score: 0, answered: false, wrongIds: [], wrongRecords: [] };
@@ -1370,15 +1375,40 @@
 
       function handleQuizAnswer(clickedBtn, chosen, q) {
         if (state.quiz.answered) return;
+
+        // Two-step flow for kanjiToKana: Step 1 (Kana) -> Step 2 (Chinese Meaning)
+        if (q.dir === 'kanjiToKana' && q.step === 1) {
+          q.step = 2;
+          q.step1Chosen = chosen;
+          q.step1Correct = (chosen === q.correctText);
+
+          document.getElementById('quizReading').textContent =
+            (q.step1Correct ? '✅ 讀音正確！' : '❌ 讀音應為「' + q.correctText + '」') + ' — 第 2 步：請選出中文意思';
+
+          const optBox = document.getElementById('quizOptions');
+          optBox.innerHTML = '';
+          q.meaningOptions.forEach(mObj => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = mObj.optText;
+            btn.className = 'text-left px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 font-semibold text-sm sm:text-base text-slate-800 transition';
+            btn.addEventListener('click', () => handleQuizAnswer(btn, mObj.optText, q));
+            optBox.appendChild(btn);
+          });
+          return;
+        }
+
         state.quiz.answered = true;
-        const isCorrect = chosen === q.correctText;
+        const targetAnswer = (q.dir === 'kanjiToKana') ? q.correctMeaningText : q.correctText;
+        const step2Correct = chosen === targetAnswer;
+        const isCorrect = (q.dir === 'kanjiToKana') ? (q.step1Correct && step2Correct) : step2Correct;
 
         const buttons = document.getElementById('quizOptions').querySelectorAll('button');
         buttons.forEach(b => {
           b.disabled = true;
-          if (b.textContent === q.correctText) {
+          if (b.textContent === targetAnswer) {
             b.className = 'jp-text text-left px-4 py-3.5 rounded-xl border border-emerald-500 bg-emerald-50 font-bold text-base text-emerald-900';
-          } else if (b === clickedBtn && !isCorrect) {
+          } else if (b === clickedBtn && !step2Correct) {
             b.className = 'jp-text text-left px-4 py-3.5 rounded-xl border border-rose-400 bg-rose-50 font-bold text-base text-rose-900';
           } else {
             b.className = 'jp-text text-left px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 opacity-60 text-base text-slate-600';
@@ -1422,7 +1452,7 @@
         q.optionObjects.forEach(obj => {
           const w = obj.wordObj;
           const wp = formatPosShort(w.pos);
-          const isChosen = obj.optText === chosen;
+          const isChosen = (q.dir === 'kanjiToKana') ? (obj.optText === q.step1Chosen) : (obj.optText === chosen);
           const prefix = obj.isCorrect ? '✅ ' : (isChosen ? '❌ ' : '• ');
           const row = document.createElement('div');
           row.className = 'jp-text leading-relaxed ' + (obj.isCorrect ? 'font-bold' : isChosen ? 'font-semibold opacity-90' : 'opacity-80');
